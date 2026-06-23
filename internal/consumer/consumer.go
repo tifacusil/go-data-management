@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/AngelloFD/go-data-management/internal/observability"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -18,10 +19,12 @@ type Consumer struct {
 	processor *processor
 	log       *slog.Logger
 	queue     string
+	counter   *observability.Counter
 }
 
 // New conecta a RabbitMQ, declara la topologia y prepara el consumidor.
-func New(amqpURL, queue string, v validator, r route, log *slog.Logger) (*Consumer, error) {
+// counter cuenta mensajes persistidos con exito (lo expone /health); puede ser nil.
+func New(amqpURL, queue string, v validator, r route, log *slog.Logger, counter *observability.Counter) (*Consumer, error) {
 	conn, err := amqp.Dial(amqpURL)
 	if err != nil {
 		return nil, fmt.Errorf("conectando a rabbitmq: %w", err)
@@ -48,6 +51,7 @@ func New(amqpURL, queue string, v validator, r route, log *slog.Logger) (*Consum
 		processor: newProcessor(v, r, log),
 		log:       log,
 		queue:     queue,
+		counter:   counter,
 	}, nil
 }
 
@@ -79,6 +83,10 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 	case outcomeAck:
 		if err := d.Ack(false); err != nil {
 			c.log.Error("ack fallo", slog.String("error", err.Error()))
+			return
+		}
+		if c.counter != nil {
+			c.counter.Inc()
 		}
 	case outcomeDLQ:
 		// nack(requeue=false) -> la cola enruta a la DLX por su x-dead-letter-*.

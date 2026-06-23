@@ -1,22 +1,28 @@
 // Command data-management es el punto de entrada del microservicio.
 // M0: config + logging. M1: persistencia. M2: consumer AMQP idempotente.
-// Query API (M3), observabilidad (M4) y Consul (M5) en hitos posteriores.
+// M3: query API REST + /health. Observabilidad (M4) y Consul (M5) despues.
 package main
 
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/AngelloFD/go-data-management/internal/config"
 	"github.com/AngelloFD/go-data-management/internal/consumer"
 	"github.com/AngelloFD/go-data-management/internal/contract"
+	"github.com/AngelloFD/go-data-management/internal/health"
+	"github.com/AngelloFD/go-data-management/internal/httpapi"
 	"github.com/AngelloFD/go-data-management/internal/observability"
 	"github.com/AngelloFD/go-data-management/internal/persistence"
+	"github.com/AngelloFD/go-data-management/internal/query"
 	"github.com/AngelloFD/go-data-management/internal/router"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -43,15 +49,20 @@ func run() error {
 		slog.Bool("consul_enabled", cfg.Consul.Enabled),
 	)
 
-	// DB pool.
 	db, err := sql.Open("mysql", cfg.MySQL.DSN)
 	if err != nil {
 		return fmt.Errorf("abriendo mysql: %w", err)
 	}
 	defer db.Close()
 
+	amqpURL := fmt.Sprintf("amqp://%s:%s@%s:%d/",
+		cfg.RabbitMQ.Username, cfg.RabbitMQ.Password, cfg.RabbitMQ.Host, cfg.RabbitMQ.Port)
+
+	counter := observability.NewCounter()
 	repo := persistence.New(db)
 	rtr := router.New(repo)
+	queryRepo := query.New(db)
+	checker := health.New(db, amqpURL)
 
 	validator, err := contract.NewValidator()
 	if err != nil {
@@ -61,17 +72,14 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Consumer AMQP idempotente.
+	// Consumer AMQP idempotente (M2).
 	var cons *consumer.Consumer
 	if cfg.RabbitMQ.ListenersEnabled {
-		amqpURL := fmt.Sprintf("amqp://%s:%s@%s:%d/",
-			cfg.RabbitMQ.Username, cfg.RabbitMQ.Password, cfg.RabbitMQ.Host, cfg.RabbitMQ.Port)
-		cons, err = consumer.New(amqpURL, cfg.RabbitMQ.Queue, validator, rtr, log)
+		cons, err = consumer.New(amqpURL, cfg.RabbitMQ.Queue, validator, rtr, log, counter)
 		if err != nil {
 			return fmt.Errorf("consumer: %w", err)
 		}
 		defer cons.Close()
-
 		go func() {
 			if err := cons.Run(ctx); err != nil {
 				log.Error("consumer termino con error", slog.String("error", err.Error()))
@@ -82,7 +90,20 @@ func run() error {
 		log.Warn("listeners deshabilitados (RABBITMQ_LISTENERS_ENABLED=false)")
 	}
 
-	// TODO(M3): arrancar query API REST + /health.
+	// Query API REST + /health (M3).
+	srv := &http.Server{
+		Addr:              fmt.Sprintf(":%d", cfg.HTTP.Port),
+		Handler:           httpapi.NewServer(queryRepo, checker, counter, log).Router(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() {
+		log.Info("http escuchando", slog.String("addr", srv.Addr))
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("http server error", slog.String("error", err.Error()))
+			stop()
+		}
+	}()
+
 	// TODO(M4): exponer /metrics + tracing OTel.
 	// TODO(M5): registrar en Consul + heartbeat.
 
@@ -90,6 +111,11 @@ func run() error {
 	<-ctx.Done()
 
 	log.Info("shutdown solicitado, cerrando")
-	// TODO(M5): deregister Consul, cerrar HTTP server.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Warn("shutdown http", slog.String("error", err.Error()))
+	}
+	// TODO(M5): deregister Consul.
 	return nil
 }
