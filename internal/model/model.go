@@ -3,7 +3,10 @@
 // Punteros en los campos numericos: distinguen "ausente" de "cero".
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // SensorType enumera los tipos soportados. Debe coincidir con el enum del schema.
 type SensorType string
@@ -36,8 +39,8 @@ type Envelope struct {
 	SensorType              SensorType `json:"sensor_type"`
 	Timestamp               time.Time  `json:"timestamp"`
 	ReceivedAt              time.Time  `json:"received_at"`
-	SamplingIntervalSeconds *int       `json:"sampling_interval_seconds,omitempty"`
-	Payload                 []byte     `json:"payload"`
+	SamplingIntervalSeconds *int            `json:"sampling_interval_seconds,omitempty"`
+	Payload                 json.RawMessage `json:"payload"`
 }
 
 type GNSSPayload struct {
