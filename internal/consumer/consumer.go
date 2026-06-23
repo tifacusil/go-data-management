@@ -24,7 +24,8 @@ type Consumer struct {
 
 // New conecta a RabbitMQ, declara la topologia y prepara el consumidor.
 // counter cuenta mensajes persistidos con exito (lo expone /health); puede ser nil.
-func New(amqpURL, queue string, v validator, r route, log *slog.Logger, counter *observability.Counter) (*Consumer, error) {
+// metrics puede ser nil (tests); si no, el processor registra metricas + spans.
+func New(amqpURL, queue string, v validator, r route, log *slog.Logger, counter *observability.Counter, metrics *observability.Metrics) (*Consumer, error) {
 	conn, err := amqp.Dial(amqpURL)
 	if err != nil {
 		return nil, fmt.Errorf("conectando a rabbitmq: %w", err)
@@ -45,10 +46,14 @@ func New(amqpURL, queue string, v validator, r route, log *slog.Logger, counter 
 		conn.Close()
 		return nil, fmt.Errorf("qos: %w", err)
 	}
+	proc := newProcessor(v, r, log)
+	if metrics != nil {
+		proc = proc.withObservability(metrics, observability.Tracer())
+	}
 	return &Consumer{
 		conn:      conn,
 		ch:        ch,
-		processor: newProcessor(v, r, log),
+		processor: proc,
 		log:       log,
 		queue:     queue,
 		counter:   counter,
@@ -90,7 +95,9 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 		}
 	case outcomeDLQ:
 		// nack(requeue=false) -> la cola enruta a la DLX por su x-dead-letter-*.
-		// TODO(M4): emitir alerta a monitoring al mandar a dead-letter (CLAUDE.md 4).
+		// Log a nivel error = senal de alerta para monitoring (CLAUDE.md 4).
+		// El conteo dm_messages_dlq_total alimenta una regla de alerta Prometheus.
+		c.log.Error("mensaje a dead-letter", slog.String("queue", QueueDeadLetter))
 		if err := d.Nack(false, false); err != nil {
 			c.log.Error("nack fallo", slog.String("error", err.Error()))
 		}

@@ -31,11 +31,12 @@ type Server struct {
 	query   QueryService
 	health  HealthChecker
 	counter *observability.Counter
+	metrics *observability.Metrics // puede ser nil (sin /metrics)
 	log     *slog.Logger
 }
 
-func NewServer(q QueryService, h HealthChecker, c *observability.Counter, log *slog.Logger) *Server {
-	return &Server{query: q, health: h, counter: c, log: log}
+func NewServer(q QueryService, h HealthChecker, c *observability.Counter, m *observability.Metrics, log *slog.Logger) *Server {
+	return &Server{query: q, health: h, counter: c, metrics: m, log: log}
 }
 
 // Router arma las rutas conforme al OpenAPI de M0.
@@ -45,7 +46,9 @@ func (s *Server) Router() http.Handler {
 	r.Get("/api/v1/sensors/{sensor_id}/readings", s.handleSensorReadings)
 	r.Get("/api/v1/projects/{project_id}/readings", s.handleProjectReadings)
 	r.Get("/api/v1/projects/{project_id}/latest", s.handleProjectLatest)
-	// TODO(M4): r.Handle("/metrics", promhttp.Handler())
+	if s.metrics != nil {
+		r.Handle("/metrics", s.metrics.Handler())
+	}
 	return r
 }
 

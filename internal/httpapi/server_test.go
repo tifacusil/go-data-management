@@ -38,7 +38,13 @@ func (f fakeHealth) CheckRabbitMQ(context.Context) error { return f.rabbitErr }
 func newTestServer(q QueryService, h HealthChecker) http.Handler {
 	c := observability.NewCounter()
 	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return NewServer(q, h, c, log).Router()
+	return NewServer(q, h, c, nil, log).Router()
+}
+
+func newTestServerWithMetrics(q QueryService, h HealthChecker, m *observability.Metrics) http.Handler {
+	c := observability.NewCounter()
+	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	return NewServer(q, h, c, m, log).Router()
 }
 
 func do(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {

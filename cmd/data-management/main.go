@@ -58,7 +58,19 @@ func run() error {
 	amqpURL := fmt.Sprintf("amqp://%s:%s@%s:%d/",
 		cfg.RabbitMQ.Username, cfg.RabbitMQ.Password, cfg.RabbitMQ.Host, cfg.RabbitMQ.Port)
 
+	// Tracing OTel (M4): flush al shutdown.
+	tracerShutdown, err := observability.InitTracer(context.Background(), cfg.Service.Name, cfg.Service.InstanceID)
+	if err != nil {
+		return fmt.Errorf("init tracer: %w", err)
+	}
+	defer func() {
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tracerShutdown(shutCtx)
+	}()
+
 	counter := observability.NewCounter()
+	metrics := observability.NewMetrics()
 	repo := persistence.New(db)
 	rtr := router.New(repo)
 	queryRepo := query.New(db)
@@ -75,7 +87,7 @@ func run() error {
 	// Consumer AMQP idempotente (M2).
 	var cons *consumer.Consumer
 	if cfg.RabbitMQ.ListenersEnabled {
-		cons, err = consumer.New(amqpURL, cfg.RabbitMQ.Queue, validator, rtr, log, counter)
+		cons, err = consumer.New(amqpURL, cfg.RabbitMQ.Queue, validator, rtr, log, counter, metrics)
 		if err != nil {
 			return fmt.Errorf("consumer: %w", err)
 		}
@@ -93,7 +105,7 @@ func run() error {
 	// Query API REST + /health (M3).
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.HTTP.Port),
-		Handler:           httpapi.NewServer(queryRepo, checker, counter, log).Router(),
+		Handler:           httpapi.NewServer(queryRepo, checker, counter, metrics, log).Router(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
