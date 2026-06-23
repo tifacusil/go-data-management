@@ -1,0 +1,99 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Calidad estatica: formato, vet, linters ─────────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt (sin diffs)
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then echo "Archivos sin formatear:"; echo "$out"; exit 1; fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.2
+
+  # ── Build + tests con cobertura ─────────────────────────────────────────
+  # -short salta los tests de integracion (testcontainers); estos corren en
+  # local/M7. CI cubre unit + contract + CDCT, rapido y determinista.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: build
+        run: go build ./...
+
+      - name: test (race + coverage)
+        run: go test -short -race -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+
+  # ── Contratos: examples validos vs JSON Schema + OpenAPI presente ───────
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: contract test (ejemplos vs JSON Schema)
+        run: go test ./contracts/...
+
+      - name: OpenAPI presente y bien formado
+        run: |
+          test -f contracts/openapi/data-management.yaml
+          python3 -c "import yaml,sys; yaml.safe_load(open('contracts/openapi/data-management.yaml'))"
+
+  # ── Validar que la imagen construye (sin publicar) ──────────────────────
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: data-management:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

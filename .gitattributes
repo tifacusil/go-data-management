@@ -1,0 +1,10 @@
+# Forzar LF en fuentes Go y YAML para que gofmt/lint pasen en CI (Linux)
+# sin importar el OS del contribuidor.
+*.go    text eol=lf
+*.mod   text eol=lf
+*.sum   text eol=lf
+*.sql   text eol=lf
+*.json  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+Dockerfile text eol=lf

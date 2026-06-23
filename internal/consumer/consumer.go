@@ -32,7 +32,7 @@ func New(amqpURL, queue string, v validator, r route, log *slog.Logger, counter 
 	}
 	ch, err := conn.Channel()
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("abriendo canal: %w", err)
 	}
 	// El servicio NO declara topologia: la cola, DLX y DLQ las pre-declara la
@@ -42,8 +42,8 @@ func New(amqpURL, queue string, v validator, r route, log *slog.Logger, counter 
 	// ocurre via x-dead-letter-exchange ya configurado en la cola (CLAUDE.md 4).
 	// Un mensaje en vuelo por consumidor: backpressure simple y orden de retry.
 	if err := ch.Qos(1, 0, false); err != nil {
-		ch.Close()
-		conn.Close()
+		_ = ch.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("qos: %w", err)
 	}
 	proc := newProcessor(v, r, log)

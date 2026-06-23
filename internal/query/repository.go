@@ -24,7 +24,7 @@ type Filter struct {
 
 // scanRows escanea el resultado de la query unificada (22 columnas en orden fijo).
 func scanRows(rows *sql.Rows) ([]Reading, error) {
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Reading
 	for rows.Next() {
 		var r row

@@ -103,7 +103,7 @@ func (r *Registrar) register(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode/100 != 2 {
 		return fmt.Errorf("status %d", res.StatusCode)
 	}
@@ -127,7 +127,7 @@ func (r *Registrar) deregister() {
 		r.log.Warn("consul deregister error", slog.String("error", err.Error()))
 		return
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	r.log.Info("consul deregister", slog.String("service_id", r.serviceID), slog.Int("status", res.StatusCode))
 }
 

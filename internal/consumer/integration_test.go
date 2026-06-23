@@ -126,8 +126,14 @@ func TestConsumer_Integration(t *testing.T) {
 	}
 
 	// --- assert: invalido en DLQ ---
+	// QueueDeclarePassive cierra el canal si falla; reabrir uno por sondeo.
 	if !eventually(t, 30*time.Second, func() bool {
-		q, err := pubCh.QueueInspect(consumer.QueueDeadLetter)
+		ch, err := pubConn.Channel()
+		if err != nil {
+			return false
+		}
+		defer ch.Close()
+		q, err := ch.QueueDeclarePassive(consumer.QueueDeadLetter, true, false, false, false, nil)
 		if err != nil {
 			return false
 		}

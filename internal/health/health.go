@@ -34,7 +34,7 @@ func (c *Checker) CheckRabbitMQ(_ context.Context) error {
 	if err != nil {
 		return fmt.Errorf("dial rabbitmq: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if conn.IsClosed() {
 		return fmt.Errorf("conexion rabbitmq cerrada")
 	}

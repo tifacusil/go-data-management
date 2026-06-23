@@ -58,7 +58,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("abriendo mysql: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	amqpURL := fmt.Sprintf("amqp://%s:%s@%s:%d/",
 		cfg.RabbitMQ.Username, cfg.RabbitMQ.Password, cfg.RabbitMQ.Host, cfg.RabbitMQ.Port)
@@ -96,7 +96,7 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("consumer: %w", err)
 		}
-		defer cons.Close()
+		defer func() { _ = cons.Close() }()
 		go func() {
 			if err := cons.Run(ctx); err != nil {
 				log.Error("consumer termino con error", slog.String("error", err.Error()))
