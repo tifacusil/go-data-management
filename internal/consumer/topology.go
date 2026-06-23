@@ -2,33 +2,36 @@ package consumer
 
 import amqp "github.com/rabbitmq/amqp091-go"
 
-// Topologia AMQP. El consumidor declara cola principal + DLX + DLQ de forma
-// idempotente para garantizar dead-lettering explicito (CLAUDE.md 4).
+// Nombres de la topologia AMQP. En produccion la declara la infraestructura
+// (tesis-infra rabbitmq/definitions.json); el servicio solo consume QueueMain.
+// QueueDeadLetter se usa solo para el log de alerta a dead-letter.
 const (
-	QueueMain      = "data_management.persist"
-	ExchangeDLX    = "sensors.dlx"
+	QueueMain       = "data_management.persist"
+	ExchangeDLX     = "sensors.dlx"
 	QueueDeadLetter = "sensors.dead_letter"
-	dlRoutingKey   = "dead_letter"
 )
 
-// declareTopology declara DLX, DLQ y la cola principal con dead-lettering.
-// Idempotente: declarar lo ya existente con los mismos args es no-op.
-func declareTopology(ch *amqp.Channel) error {
-	// Dead-letter exchange (direct) + cola de dead-letter.
-	if err := ch.ExchangeDeclare(ExchangeDLX, "direct", true, false, false, false, nil); err != nil {
+// declareTopologyForTest declara cola principal + DLX + DLQ para tests de
+// integracion con un broker efimero (sin definitions.json). DEBE coincidir con
+// tesis-infra/local/infra/rabbitmq/definitions.json para no divergir:
+//   - sensors.dlx: exchange topic durable
+//   - data_management.persist: x-dead-letter-exchange=sensors.dlx + ttl/max-length
+//   - binding sensors.dlx -> sensors.dead_letter con routing key "#"
+func declareTopologyForTest(ch *amqp.Channel) error {
+	if err := ch.ExchangeDeclare(ExchangeDLX, "topic", true, false, false, false, nil); err != nil {
 		return err
 	}
 	if _, err := ch.QueueDeclare(QueueDeadLetter, true, false, false, false, nil); err != nil {
 		return err
 	}
-	if err := ch.QueueBind(QueueDeadLetter, dlRoutingKey, ExchangeDLX, false, nil); err != nil {
+	if err := ch.QueueBind(QueueDeadLetter, "#", ExchangeDLX, false, nil); err != nil {
 		return err
 	}
-
-	// Cola principal: enruta a la DLX cuando un mensaje es nack(requeue=false).
 	args := amqp.Table{
-		"x-dead-letter-exchange":    ExchangeDLX,
-		"x-dead-letter-routing-key": dlRoutingKey,
+		"x-dead-letter-exchange": ExchangeDLX,
+		"x-message-ttl":          int32(86400000),
+		"x-max-length":           int32(1000000),
+		"x-queue-type":           "classic",
 	}
 	if _, err := ch.QueueDeclare(QueueMain, true, false, false, false, args); err != nil {
 		return err

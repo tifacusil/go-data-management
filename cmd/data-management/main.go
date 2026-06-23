@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/AngelloFD/go-data-management/internal/config"
+	"github.com/AngelloFD/go-data-management/internal/consul"
 	"github.com/AngelloFD/go-data-management/internal/consumer"
 	"github.com/AngelloFD/go-data-management/internal/contract"
 	"github.com/AngelloFD/go-data-management/internal/health"
@@ -27,6 +28,10 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 )
+
+// version es el tag de version para Consul; se sobreescribe en build con
+// -ldflags "-X main.version=...".
+var version = "0.1.0"
 
 func main() {
 	if err := run(); err != nil {
@@ -116,18 +121,36 @@ func run() error {
 		}
 	}()
 
-	// TODO(M4): exponer /metrics + tracing OTel.
-	// TODO(M5): registrar en Consul + heartbeat.
+	// Consul: registro + heartbeat; deregistra al cancelar ctx (M5).
+	if cfg.Consul.Enabled {
+		reg := consul.New(consul.Config{
+			BaseURL:         cfg.Consul.BaseURL,
+			Token:           cfg.Consul.Token,
+			ServiceName:     cfg.Consul.ServiceName,
+			ServiceIP:       cfg.Consul.ServiceIP,
+			ServicePort:     cfg.HTTP.Port,
+			HealthPath:      cfg.Consul.HealthPath,
+			Interval:        cfg.Consul.Interval,
+			Heartbeat:       cfg.Consul.Heartbeat,
+			DeregisterAfter: cfg.Consul.DeregisterAfter,
+			Version:         version,
+			Env:             cfg.Service.Env,
+		}, log)
+		go reg.Run(ctx) // deregistra solo al cerrar ctx
+	} else {
+		log.Warn("consul deshabilitado (CONSUL_ENABLED=false)")
+	}
 
 	log.Info("servicio listo")
 	<-ctx.Done()
 
 	log.Info("shutdown solicitado, cerrando")
+	// Dar tiempo a que el registrar deregistre antes de salir.
+	time.Sleep(500 * time.Millisecond)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Warn("shutdown http", slog.String("error", err.Error()))
 	}
-	// TODO(M5): deregister Consul.
 	return nil
 }

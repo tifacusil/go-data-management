@@ -40,7 +40,14 @@ type RabbitMQ struct {
 }
 
 type MySQL struct {
-	DSN string // secreto requerido (incluye password)
+	// DSN se construye desde MYSQL_HOST/PORT/DATABASE/USER/PASSWORD (convencion
+	// de tesis-infra). Incluye parseTime=true&loc=UTC fijos.
+	DSN string
+}
+
+// buildDSN arma el DSN de go-sql-driver/mysql desde partes.
+func buildDSN(user, pass, host string, port int, db string) string {
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=UTC", user, pass, host, port, db)
 }
 
 type Consul struct {
@@ -60,30 +67,40 @@ type Consul struct {
 func Load() (*Config, error) {
 	var errs []string
 
+	// MySQL: convencion split de tesis-infra. DSN se arma desde las partes.
+	mysqlHost := getenv("MYSQL_HOST", "localhost")
+	mysqlPort := getint("MYSQL_PORT", 3306, &errs)
+	mysqlDB := getenv("MYSQL_DATABASE", "data_management")
+	mysqlUser := getenv("MYSQL_USER", "")
+	mysqlPass := os.Getenv("MYSQL_PASSWORD")
+
+	// Consul: HOST/PORT -> base URL.
+	consulURL := fmt.Sprintf("http://%s:%d", getenv("CONSUL_HOST", "localhost"), getint("CONSUL_PORT", 8500, &errs))
+
 	cfg := &Config{
 		Service: Service{
 			Name:       getenv("SERVICE_NAME", "data-management"),
 			InstanceID: getenv("INSTANCE_ID", hostnameOr("data-management-local")),
-			Env:        getenv("APP_ENV", "dev"),
+			Env:        getenv("ENV", "dev"),
 		},
 		HTTP: HTTP{
-			Port: getint("SERVER_PORT", 8082, &errs),
+			Port: getint("HTTP_PORT", 8080, &errs),
 		},
 		RabbitMQ: RabbitMQ{
 			Host:             getenv("RABBITMQ_HOST", "localhost"),
 			Port:             getint("RABBITMQ_PORT", 5672, &errs),
-			Username:         getenv("RABBITMQ_USERNAME", "subscriber"),
+			Username:         getenv("RABBITMQ_USER", "data_management"),
 			Password:         os.Getenv("RABBITMQ_PASSWORD"),
 			Queue:            getenv("RABBITMQ_QUEUE", "data_management.persist"),
 			ListenersEnabled: getbool("RABBITMQ_LISTENERS_ENABLED", true),
 		},
 		MySQL: MySQL{
-			DSN: os.Getenv("MYSQL_DSN"),
+			DSN: buildDSN(mysqlUser, mysqlPass, mysqlHost, mysqlPort, mysqlDB),
 		},
 		Consul: Consul{
 			Enabled:         getbool("CONSUL_ENABLED", true),
-			BaseURL:         getenv("CONSUL_BASE_URL", "http://localhost:8500"),
-			Token:           os.Getenv("CONSUL_HTTP_TOKEN"),
+			BaseURL:         consulURL,
+			Token:           os.Getenv("CONSUL_TOKEN"),
 			ServiceName:     getenv("CONSUL_SERVICE_NAME", "data-management"),
 			ServiceIP:       os.Getenv("SERVICE_IP"),
 			HealthPath:      getenv("CONSUL_HEALTH_PATH", "/health"),
@@ -93,17 +110,15 @@ func Load() (*Config, error) {
 		},
 	}
 
-	// Secretos requeridos.
+	// Secretos / requeridos.
 	if cfg.RabbitMQ.Password == "" {
 		errs = append(errs, "RABBITMQ_PASSWORD requerido")
 	}
-	if cfg.MySQL.DSN == "" {
-		errs = append(errs, "MYSQL_DSN requerido (ej. user:pass@tcp(host:3306)/data_management?parseTime=true&loc=UTC)")
+	if mysqlUser == "" {
+		errs = append(errs, "MYSQL_USER requerido")
 	}
-	if cfg.Consul.Enabled && cfg.Consul.Token == "" {
-		// Token puede ser opcional segun ACLs de Consul; warning, no fatal.
-		// TODO(SE-practice): si ACLs activas y falta token, register fallara — ref CLAUDE.md 1.7
-		_ = cfg.Consul.Token
+	if mysqlPass == "" {
+		errs = append(errs, "MYSQL_PASSWORD requerido")
 	}
 
 	if len(errs) > 0 {

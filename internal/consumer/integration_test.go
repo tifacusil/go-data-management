@@ -64,6 +64,20 @@ func TestConsumer_Integration(t *testing.T) {
 		t.Fatalf("amqp url: %v", err)
 	}
 
+	// --- declarar topologia (en prod la hace tesis-infra/definitions.json) ---
+	setupConn, err := amqp.Dial(amqpURL)
+	if err != nil {
+		t.Fatalf("setup dial: %v", err)
+	}
+	setupCh, err := setupConn.Channel()
+	if err != nil {
+		t.Fatalf("setup channel: %v", err)
+	}
+	if err := consumer.DeclareTopologyForTest(setupCh); err != nil {
+		t.Fatalf("declarar topologia: %v", err)
+	}
+	_ = setupConn.Close()
+
 	// --- wiring ---
 	v, err := contract.NewValidator()
 	if err != nil {

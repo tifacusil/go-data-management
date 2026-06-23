@@ -35,11 +35,11 @@ func New(amqpURL, queue string, v validator, r route, log *slog.Logger, counter 
 		conn.Close()
 		return nil, fmt.Errorf("abriendo canal: %w", err)
 	}
-	if err := declareTopology(ch); err != nil {
-		ch.Close()
-		conn.Close()
-		return nil, fmt.Errorf("declarando topologia: %w", err)
-	}
+	// El servicio NO declara topologia: la cola, DLX y DLQ las pre-declara la
+	// infraestructura (tesis-infra rabbitmq/definitions.json) y el usuario del
+	// servicio no tiene permiso de configure sobre sensors.dlx / sensors.dead_letter.
+	// Solo consume la cola existente (igual que el baseline). El dead-lettering
+	// ocurre via x-dead-letter-exchange ya configurado en la cola (CLAUDE.md 4).
 	// Un mensaje en vuelo por consumidor: backpressure simple y orden de retry.
 	if err := ch.Qos(1, 0, false); err != nil {
 		ch.Close()
