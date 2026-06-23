@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://landslide.local/contracts/schemas/envelope.schema.json",
+  "title": "SensorReadingEnvelope",
+  "description": "Envelope publicado a la cola data_management.persist. schema_version semantico (CLAUDE.md 1.4).",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "message_id",
+    "project_id",
+    "sensor_id",
+    "sensor_type",
+    "timestamp",
+    "received_at",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+){0,2}$",
+      "description": "Version semantica del contrato. Major actual aceptado, con periodo de gracia para anterior."
+    },
+    "message_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "UUID v4 generado por el productor. Clave de idempotencia."
+    },
+    "project_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "sensor_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "sensor_type": {
+      "type": "string",
+      "enum": ["gnss", "rainfall", "strain", "soil_pressure", "deep_displacement"]
+    },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "received_at": { "type": "string", "format": "date-time" },
+    "sampling_interval_seconds": { "type": "integer", "minimum": 0 },
+    "payload": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "sensor_type": { "const": "gnss" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/gnssPayload" } } }
+    },
+    {
+      "if": { "properties": { "sensor_type": { "const": "rainfall" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/rainfallPayload" } } }
+    },
+    {
+      "if": { "properties": { "sensor_type": { "const": "strain" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/strainPayload" } } }
+    },
+    {
+      "if": { "properties": { "sensor_type": { "const": "soil_pressure" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/soilPressurePayload" } } }
+    },
+    {
+      "if": { "properties": { "sensor_type": { "const": "deep_displacement" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/deepDisplacementPayload" } } }
+    }
+  ],
+  "$defs": {
+    "gnssPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "displacement_x_mm": { "type": "number" },
+        "displacement_y_mm": { "type": "number" },
+        "displacement_z_mm": { "type": "number" },
+        "displacement_horizontal_mm": { "type": "number" },
+        "cumulative_displacement_mm": { "type": "number" },
+        "fix_quality": { "type": "string", "maxLength": 16 }
+      }
+    },
+    "rainfallPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rainfall_mm": { "type": "number" },
+        "cumulative_rainfall_mm": { "type": "number" },
+        "interval_minutes": { "type": "integer" }
+      }
+    },
+    "strainPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "strain_microstrain": { "type": "number" },
+        "temperature_celsius": { "type": "number" }
+      }
+    },
+    "soilPressurePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pressure_kpa": { "type": "number" },
+        "temperature_celsius": { "type": "number" }
+      }
+    },
+    "deepDisplacementPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "depth_m": { "type": "number" },
+        "tilt_x_mm": { "type": "number" },
+        "tilt_y_mm": { "type": "number" },
+        "cumulative_tilt_mm": { "type": "number" }
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "message_id": "550e8400-e29b-41d4-a716-446655440001",
+  "project_id": "demo",
+  "sensor_id": "GNSS-01",
+  "sensor_type": "gnss",
+  "timestamp": "2026-05-17T00:00:00Z",
+  "received_at": "2026-05-17T00:00:01Z",
+  "sampling_interval_seconds": 60,
+  "payload": {
+    "displacement_x_mm": 1.2,
+    "displacement_y_mm": -0.4,
+    "displacement_z_mm": 0.1,
+    "displacement_horizontal_mm": 1.26,
+    "cumulative_displacement_mm": 12.5,
+    "fix_quality": "RTK_FIXED"
+  }
+}

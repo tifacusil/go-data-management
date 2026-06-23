@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0.0",
+  "message_id": "550e8400-e29b-41d4-a716-446655440005",
+  "project_id": "demo",
+  "sensor_id": "DEEP-01",
+  "sensor_type": "deep_displacement",
+  "timestamp": "2026-05-17T00:00:00Z",
+  "received_at": "2026-05-17T00:00:01Z",
+  "sampling_interval_seconds": 60,
+  "payload": {
+    "depth_m": 12.0,
+    "tilt_x_mm": 0.8,
+    "tilt_y_mm": -0.3,
+    "cumulative_tilt_mm": 4.5
+  }
+}

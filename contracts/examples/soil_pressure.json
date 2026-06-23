@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "message_id": "550e8400-e29b-41d4-a716-446655440004",
+  "project_id": "demo",
+  "sensor_id": "SOIL-01",
+  "sensor_type": "soil_pressure",
+  "timestamp": "2026-05-17T00:00:00Z",
+  "received_at": "2026-05-17T00:00:01Z",
+  "sampling_interval_seconds": 60,
+  "payload": {
+    "pressure_kpa": 87.4,
+    "temperature_celsius": 16.1
+  }
+}

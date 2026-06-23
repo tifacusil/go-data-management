@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "message_id": "550e8400-e29b-41d4-a716-446655440003",
+  "project_id": "demo",
+  "sensor_id": "STRAIN-01",
+  "sensor_type": "strain",
+  "timestamp": "2026-05-17T00:00:00Z",
+  "received_at": "2026-05-17T00:00:01Z",
+  "sampling_interval_seconds": 60,
+  "payload": {
+    "strain_microstrain": 152.7,
+    "temperature_celsius": 18.3
+  }
+}

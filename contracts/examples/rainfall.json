@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0.0",
+  "message_id": "550e8400-e29b-41d4-a716-446655440002",
+  "project_id": "demo",
+  "sensor_id": "RAIN-01",
+  "sensor_type": "rainfall",
+  "timestamp": "2026-05-17T00:00:00Z",
+  "received_at": "2026-05-17T00:00:01Z",
+  "sampling_interval_seconds": 60,
+  "payload": {
+    "rainfall_mm": 1.2,
+    "cumulative_rainfall_mm": 10.5,
+    "interval_minutes": 60
+  }
+}
