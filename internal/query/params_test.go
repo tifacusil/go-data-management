@@ -29,13 +29,13 @@ func TestParseParams_Defaults(t *testing.T) {
 
 func TestParseParams_Errors(t *testing.T) {
 	cases := map[string]map[string]string{
-		"limit cero":            {"limit": "0"},
-		"limit excede":          {"limit": "1001"},
-		"offset negativo":       {"offset": "-1"},
-		"sensor_type malo":      {"sensor_type": "lava"},
-		"from > to":             {"from": "2026-05-18T00:00:00Z", "to": "2026-05-17T00:00:00Z"},
-		"fix_quality no gnss":   {"sensor_type": "rainfall", "fix_quality": "RTK"},
-		"from no iso":           {"from": "ayer"},
+		"limit cero":          {"limit": "0"},
+		"limit excede":        {"limit": "1001"},
+		"offset negativo":     {"offset": "-1"},
+		"sensor_type malo":    {"sensor_type": "lava"},
+		"from > to":           {"from": "2026-05-18T00:00:00Z", "to": "2026-05-17T00:00:00Z"},
+		"fix_quality no gnss": {"sensor_type": "rainfall", "fix_quality": "RTK"},
+		"from no iso":         {"from": "ayer"},
 	}
 	for name, m := range cases {
 		t.Run(name, func(t *testing.T) {

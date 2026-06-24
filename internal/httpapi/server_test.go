@@ -15,9 +15,9 @@ import (
 )
 
 type fakeQuery struct {
-	paged   query.Paged
-	latest  []query.Reading
-	err     error
+	paged  query.Paged
+	latest []query.Reading
+	err    error
 }
 
 func (f fakeQuery) SensorReadings(_ context.Context, _ string, _ query.Filter, _, _ int) (query.Paged, error) {

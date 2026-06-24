@@ -31,11 +31,11 @@ type HTTP struct {
 }
 
 type RabbitMQ struct {
-	Host            string
-	Port            int
-	Username        string
-	Password        string // secreto requerido
-	Queue           string
+	Host             string
+	Port             int
+	Username         string
+	Password         string // secreto requerido
+	Queue            string
 	ListenersEnabled bool
 }
 

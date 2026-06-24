@@ -32,13 +32,13 @@ func (s SensorType) Valid() bool {
 // Envelope es el mensaje crudo recibido de la cola data_management.persist.
 // payload queda como json.RawMessage para deserializarlo segun sensor_type (M2).
 type Envelope struct {
-	SchemaVersion           string     `json:"schema_version"`
-	MessageID               string     `json:"message_id"`
-	ProjectID               string     `json:"project_id"`
-	SensorID                string     `json:"sensor_id"`
-	SensorType              SensorType `json:"sensor_type"`
-	Timestamp               time.Time  `json:"timestamp"`
-	ReceivedAt              time.Time  `json:"received_at"`
+	SchemaVersion           string          `json:"schema_version"`
+	MessageID               string          `json:"message_id"`
+	ProjectID               string          `json:"project_id"`
+	SensorID                string          `json:"sensor_id"`
+	SensorType              SensorType      `json:"sensor_type"`
+	Timestamp               time.Time       `json:"timestamp"`
+	ReceivedAt              time.Time       `json:"received_at"`
 	SamplingIntervalSeconds *int            `json:"sampling_interval_seconds,omitempty"`
 	Payload                 json.RawMessage `json:"payload"`
 }

@@ -38,9 +38,9 @@ func TestValidate(t *testing.T) {
 	}
 
 	tests := map[string]string{
-		"json roto":          `{not json`,
-		"sensor_type malo":   `{"schema_version":"1","message_id":"m","project_id":"p","sensor_id":"s","sensor_type":"lava","timestamp":"2026-05-17T00:00:00Z","received_at":"2026-05-17T00:00:00Z","payload":{}}`,
-		"falta message_id":   `{"schema_version":"1","project_id":"p","sensor_id":"s","sensor_type":"rainfall","timestamp":"2026-05-17T00:00:00Z","received_at":"2026-05-17T00:00:00Z","payload":{}}`,
+		"json roto":           `{not json`,
+		"sensor_type malo":    `{"schema_version":"1","message_id":"m","project_id":"p","sensor_id":"s","sensor_type":"lava","timestamp":"2026-05-17T00:00:00Z","received_at":"2026-05-17T00:00:00Z","payload":{}}`,
+		"falta message_id":    `{"schema_version":"1","project_id":"p","sensor_id":"s","sensor_type":"rainfall","timestamp":"2026-05-17T00:00:00Z","received_at":"2026-05-17T00:00:00Z","payload":{}}`,
 		"payload campo extra": `{"schema_version":"1","message_id":"m","project_id":"p","sensor_id":"s","sensor_type":"rainfall","timestamp":"2026-05-17T00:00:00Z","received_at":"2026-05-17T00:00:00Z","payload":{"foo":1}}`,
 	}
 	for name, raw := range tests {
