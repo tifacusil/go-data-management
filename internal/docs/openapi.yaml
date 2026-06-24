@@ -1,0 +1,201 @@
+openapi: 3.0.3
+info:
+  title: Data Management Service API
+  description: |
+    Query API + health para el microservicio data-management (reescritura Go).
+    Solo endpoints externos/operacionales (CLAUDE.md 0). Ingesta es vIa RabbitMQ, no HTTP.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8082
+    description: local
+tags:
+  - name: health
+  - name: readings
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Health check real (MySQL + RabbitMQ)
+      responses:
+        "200":
+          description: healthy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          description: unhealthy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+
+  /metrics:
+    get:
+      tags: [health]
+      summary: Metricas Prometheus (text exposition)
+      responses:
+        "200":
+          description: metricas
+          content:
+            text/plain: {}
+
+  /api/v1/sensors/{sensor_id}/readings:
+    get:
+      tags: [readings]
+      summary: Lecturas de un sensor (paginado)
+      parameters:
+        - $ref: "#/components/parameters/SensorId"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/SensorType"
+        - $ref: "#/components/parameters/FixQuality"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: pagina de lecturas
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PagedReadings" }
+        "400":
+          description: parametro invalido
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/projects/{project_id}/readings:
+    get:
+      tags: [readings]
+      summary: Lecturas de un proyecto (paginado)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/SensorType"
+        - $ref: "#/components/parameters/FixQuality"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: pagina de lecturas
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PagedReadings" }
+        "400":
+          description: parametro invalido
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/projects/{project_id}/latest:
+    get:
+      tags: [readings]
+      summary: Ultima lectura por sensor de un proyecto
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/SensorType"
+        - $ref: "#/components/parameters/FixQuality"
+      responses:
+        "200":
+          description: lecturas mas recientes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Reading" }
+        "400":
+          description: parametro invalido
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+components:
+  parameters:
+    SensorId:
+      name: sensor_id
+      in: path
+      required: true
+      schema: { type: string }
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      schema: { type: string }
+    From:
+      name: from
+      in: query
+      required: false
+      schema: { type: string, format: date-time }
+    To:
+      name: to
+      in: query
+      required: false
+      schema: { type: string, format: date-time }
+    SensorType:
+      name: sensor_type
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [gnss, rainfall, strain, soil_pressure, deep_displacement]
+    FixQuality:
+      name: fix_quality
+      in: query
+      required: false
+      description: Solo aplica cuando sensor_type=gnss
+      schema: { type: string }
+    Offset:
+      name: offset
+      in: query
+      required: false
+      schema: { type: integer, minimum: 0, default: 0 }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [healthy, unhealthy] }
+        mysql: { $ref: "#/components/schemas/Check" }
+        rabbitmq: { $ref: "#/components/schemas/Check" }
+        messages_processed: { type: integer, format: int64 }
+    Check:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        error: { type: string }
+    Reading:
+      type: object
+      required: [project_id, sensor_id, sensor_type, timestamp, received_at]
+      properties:
+        project_id: { type: string }
+        sensor_id: { type: string }
+        sensor_type: { type: string }
+        timestamp: { type: string, format: date-time }
+        received_at: { type: string, format: date-time }
+        payload:
+          type: object
+          description: campos especificos del sensor_type
+    PagedReadings:
+      type: object
+      required: [total, offset, limit, items]
+      properties:
+        total: { type: integer, format: int64 }
+        offset: { type: integer }
+        limit: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Reading" }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }

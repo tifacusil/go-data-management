@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/AngelloFD/go-data-management/internal/docs"
 	"github.com/AngelloFD/go-data-management/internal/observability"
 	"github.com/AngelloFD/go-data-management/internal/query"
 	"github.com/go-chi/chi/v5"
@@ -46,6 +47,9 @@ func (s *Server) Router() http.Handler {
 	r.Get("/api/v1/sensors/{sensor_id}/readings", s.handleSensorReadings)
 	r.Get("/api/v1/projects/{project_id}/readings", s.handleProjectReadings)
 	r.Get("/api/v1/projects/{project_id}/latest", s.handleProjectLatest)
+	// Swagger UI + spec: GET /docs (UI), GET /docs/openapi.yaml (spec).
+	// Tras el gateway llega como /api/v1/data/docs/ (nginx hace rewrite).
+	r.Mount("/docs", docs.Routes())
 	if s.metrics != nil {
 		r.Handle("/metrics", s.metrics.Handler())
 	}
