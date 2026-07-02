@@ -10,10 +10,9 @@ RUN go mod download
 
 COPY . .
 
-# Binario estatico. version inyectada por ldflags (tag Consul version-).
-ARG VERSION=0.1.0
+# Binario estatico.
 RUN CGO_ENABLED=0 GOOS=linux go build \
-    -ldflags "-s -w -X main.version=${VERSION}" \
+    -ldflags "-s -w" \
     -o /out/data-management ./cmd/data-management
 
 # ── runtime ────────────────────────────────────────────────────────────────
@@ -24,7 +23,8 @@ USER app
 WORKDIR /app
 COPY --from=build /out/data-management /app/data-management
 
-# Puerto HTTP por defecto (REST API + /health + /metrics). Override con HTTP_PORT.
-EXPOSE 8080
+# HTTP (REST API + /health + /metrics) y gRPC (ReadingService). Override con
+# HTTP_PORT / GRPC_PORT.
+EXPOSE 8080 9090
 
 ENTRYPOINT ["/app/data-management"]

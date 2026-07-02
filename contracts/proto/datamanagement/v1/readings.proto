@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+// data-management: lectura de series de sensores consumida por data-analysis.
+// Reemplaza el acceso directo de data-analysis a las tablas de data-management
+// (viola database-per-service, CLAUDE.md §1.2). Llamada sincrona gRPC: el
+// consumidor (data-analysis) debe envolverla en circuit breaker + retry +
+// timeout (CLAUDE.md §5).
+package datamanagement.v1;
+
+option go_package = "github.com/AngelloFD/go-data-management/internal/grpcapi/gen/datamanagement/v1;datamanagementv1";
+
+// ReadingService expone lecturas persistidas sin exponer el esquema fisico.
+service ReadingService {
+  // GetReadingSeries devuelve la serie temporal de un sensor_type para un
+  // proyecto en una ventana. El valor es la columna canonica del tipo
+  // (ej. gnss -> cumulative_displacement_mm); data-analysis no conoce la columna.
+  rpc GetReadingSeries(GetReadingSeriesRequest) returns (GetReadingSeriesResponse);
+}
+
+message GetReadingSeriesRequest {
+  string project_id = 1;    // requerido
+  string sensor_type = 2;   // "gnss"|"rainfall"|"strain"|"soil_pressure"|"deep_displacement"
+  string window_start = 3;  // ISO-8601 UTC, inclusivo (requerido)
+  string window_end = 4;    // ISO-8601 UTC, inclusivo (requerido)
+  int32 limit = 5;          // 0 => default servidor (500)
+}
+
+message SeriesPoint {
+  string timestamp = 1;  // ISO-8601 UTC
+  double value = 2;      // valor canonico del sensor_type
+}
+
+// GetReadingSeriesResponse: serie ordenada por timestamp ASC. points vacio =
+// sin lecturas en la ventana (no es error; data-analysis lo trata como no_data).
+message GetReadingSeriesResponse {
+  string sensor_type = 1;         // eco del type resuelto
+  string value_column = 2;        // columna canonica usada (trazabilidad)
+  repeated SeriesPoint points = 3;
+}

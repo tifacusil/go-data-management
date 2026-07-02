@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,9 +17,10 @@ import (
 	"time"
 
 	"github.com/AngelloFD/go-data-management/internal/config"
-	"github.com/AngelloFD/go-data-management/internal/consul"
 	"github.com/AngelloFD/go-data-management/internal/consumer"
 	"github.com/AngelloFD/go-data-management/internal/contract"
+	"github.com/AngelloFD/go-data-management/internal/grpcapi"
+	datamanagementv1 "github.com/AngelloFD/go-data-management/internal/grpcapi/gen/datamanagement/v1"
 	"github.com/AngelloFD/go-data-management/internal/health"
 	"github.com/AngelloFD/go-data-management/internal/httpapi"
 	"github.com/AngelloFD/go-data-management/internal/observability"
@@ -27,11 +29,8 @@ import (
 	"github.com/AngelloFD/go-data-management/internal/router"
 
 	_ "github.com/go-sql-driver/mysql"
+	"google.golang.org/grpc"
 )
-
-// version es el tag de version para Consul; se sobreescribe en build con
-// -ldflags "-X main.version=...".
-var version = "0.1.0"
 
 func main() {
 	if err := run(); err != nil {
@@ -50,8 +49,8 @@ func run() error {
 	log := observability.NewLogger(cfg.Service.Name, cfg.Service.InstanceID, cfg.Service.Env)
 	log.Info("servicio iniciando",
 		slog.Int("http_port", cfg.HTTP.Port),
+		slog.Int("grpc_port", cfg.GRPC.Port),
 		slog.String("rabbitmq_queue", cfg.RabbitMQ.Queue),
-		slog.Bool("consul_enabled", cfg.Consul.Enabled),
 	)
 
 	db, err := sql.Open("mysql", cfg.MySQL.DSN)
@@ -121,36 +120,34 @@ func run() error {
 		}
 	}()
 
-	// Consul: registro + heartbeat; deregistra al cancelar ctx (M5).
-	if cfg.Consul.Enabled {
-		reg := consul.New(consul.Config{
-			BaseURL:         cfg.Consul.BaseURL,
-			Token:           cfg.Consul.Token,
-			ServiceName:     cfg.Consul.ServiceName,
-			ServiceIP:       cfg.Consul.ServiceIP,
-			ServicePort:     cfg.HTTP.Port,
-			HealthPath:      cfg.Consul.HealthPath,
-			Interval:        cfg.Consul.Interval,
-			Heartbeat:       cfg.Consul.Heartbeat,
-			DeregisterAfter: cfg.Consul.DeregisterAfter,
-			Version:         version,
-			Env:             cfg.Service.Env,
-		}, log)
-		go reg.Run(ctx) // deregistra solo al cerrar ctx
-	} else {
-		log.Warn("consul deshabilitado (CONSUL_ENABLED=false)")
+	// gRPC: ReadingService para consumo sincrono de data-analysis (reemplaza su
+	// acceso directo a las tablas, CLAUDE.md §1.2).
+	grpcSrv := grpc.NewServer()
+	datamanagementv1.RegisterReadingServiceServer(grpcSrv, grpcapi.NewReadingServer(queryRepo, log))
+	grpcLis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.GRPC.Port))
+	if err != nil {
+		return fmt.Errorf("grpc listen: %w", err)
 	}
+	go func() {
+		log.Info("grpc escuchando", slog.String("addr", grpcLis.Addr().String()))
+		if err := grpcSrv.Serve(grpcLis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+			log.Error("grpc server error", slog.String("error", err.Error()))
+			stop()
+		}
+	}()
+
+	// Service discovery: DNS de Kubernetes (nombre de Service). Sin Consul: los
+	// consumidores (data-analysis) resuelven data-management por DNS del cluster.
 
 	log.Info("servicio listo")
 	<-ctx.Done()
 
 	log.Info("shutdown solicitado, cerrando")
-	// Dar tiempo a que el registrar deregistre antes de salir.
-	time.Sleep(500 * time.Millisecond)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Warn("shutdown http", slog.String("error", err.Error()))
 	}
+	grpcSrv.GracefulStop()
 	return nil
 }

@@ -8,16 +8,15 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Config es la configuracion completa del servicio, resuelta una sola vez al boot.
 type Config struct {
 	Service  Service
 	HTTP     HTTP
+	GRPC     GRPC
 	RabbitMQ RabbitMQ
 	MySQL    MySQL
-	Consul   Consul
 }
 
 type Service struct {
@@ -27,6 +26,10 @@ type Service struct {
 }
 
 type HTTP struct {
+	Port int
+}
+
+type GRPC struct {
 	Port int
 }
 
@@ -50,18 +53,6 @@ func buildDSN(user, pass, host string, port int, db string) string {
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=UTC", user, pass, host, port, db)
 }
 
-type Consul struct {
-	Enabled         bool
-	BaseURL         string
-	Token           string
-	ServiceName     string
-	ServiceIP       string
-	HealthPath      string
-	Interval        time.Duration
-	Heartbeat       time.Duration
-	DeregisterAfter time.Duration
-}
-
 // Load lee el entorno, aplica defaults y valida. Devuelve error agregado con
 // todos los problemas encontrados para no obligar a corregir uno por uno.
 func Load() (*Config, error) {
@@ -74,9 +65,6 @@ func Load() (*Config, error) {
 	mysqlUser := getenv("MYSQL_USER", "")
 	mysqlPass := os.Getenv("MYSQL_PASSWORD")
 
-	// Consul: HOST/PORT -> base URL.
-	consulURL := fmt.Sprintf("http://%s:%d", getenv("CONSUL_HOST", "localhost"), getint("CONSUL_PORT", 8500, &errs))
-
 	cfg := &Config{
 		Service: Service{
 			Name:       getenv("SERVICE_NAME", "data-management"),
@@ -85,6 +73,9 @@ func Load() (*Config, error) {
 		},
 		HTTP: HTTP{
 			Port: getint("HTTP_PORT", 8080, &errs),
+		},
+		GRPC: GRPC{
+			Port: getint("GRPC_PORT", 9090, &errs),
 		},
 		RabbitMQ: RabbitMQ{
 			Host:             getenv("RABBITMQ_HOST", "localhost"),
@@ -96,17 +87,6 @@ func Load() (*Config, error) {
 		},
 		MySQL: MySQL{
 			DSN: buildDSN(mysqlUser, mysqlPass, mysqlHost, mysqlPort, mysqlDB),
-		},
-		Consul: Consul{
-			Enabled:         getbool("CONSUL_ENABLED", true),
-			BaseURL:         consulURL,
-			Token:           os.Getenv("CONSUL_TOKEN"),
-			ServiceName:     getenv("CONSUL_SERVICE_NAME", "data-management"),
-			ServiceIP:       os.Getenv("SERVICE_IP"),
-			HealthPath:      getenv("CONSUL_HEALTH_PATH", "/health"),
-			Interval:        getdur("CONSUL_INTERVAL", 10*time.Second, &errs),
-			Heartbeat:       getdur("CONSUL_HEARTBEAT", 10*time.Second, &errs),
-			DeregisterAfter: getdur("CONSUL_DEREGISTER_AFTER", 30*time.Second, &errs),
 		},
 	}
 
@@ -157,19 +137,6 @@ func getint(key string, def int, errs *[]string) int {
 		return def
 	}
 	return n
-}
-
-func getdur(key string, def time.Duration, errs *[]string) time.Duration {
-	v := os.Getenv(key)
-	if v == "" {
-		return def
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil {
-		*errs = append(*errs, fmt.Sprintf("%s debe ser duracion (ej. 10s), got %q", key, v))
-		return def
-	}
-	return d
 }
 
 func hostnameOr(def string) string {
