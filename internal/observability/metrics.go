@@ -3,6 +3,7 @@ package observability
 import (
 	"net/http"
 
+	grpcprom "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -20,6 +21,10 @@ type Metrics struct {
 	MessagesInvalid   prometheus.Counter   // rechazo por schema
 	MessagesRetried   prometheus.Counter   // reintentos transitorios
 	PersistLatency    prometheus.Histogram // latencia persistencia (segundos)
+
+	// GRPCServer instrumenta el servidor gRPC (ReadingService): throughput,
+	// latencia por metodo y errores por code. Se expone en el mismo /metrics.
+	GRPCServer *grpcprom.ServerMetrics
 }
 
 // NewMetrics crea un registry propio con collectors de Go (cpu/mem/goroutines)
@@ -31,9 +36,17 @@ func NewMetrics() *Metrics {
 	reg.MustRegister(collectors.NewGoCollector())
 	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 
+	// Metricas del servidor gRPC con histograma de latencia habilitado.
+	// Registradas en el registry propio (no el global) => salen por /metrics 8080.
+	grpcServer := grpcprom.NewServerMetrics(
+		grpcprom.WithServerHandlingTimeHistogram(),
+	)
+	reg.MustRegister(grpcServer)
+
 	f := promauto.With(reg)
 	return &Metrics{
-		reg: reg,
+		reg:        reg,
+		GRPCServer: grpcServer,
 		MessagesProcessed: f.NewCounter(prometheus.CounterOpts{
 			Name: "dm_messages_processed_total",
 			Help: "Mensajes persistidos con exito.",

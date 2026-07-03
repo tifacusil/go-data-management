@@ -121,9 +121,14 @@ func run() error {
 	}()
 
 	// gRPC: ReadingService para consumo sincrono de data-analysis (reemplaza su
-	// acceso directo a las tablas, CLAUDE.md §1.2).
-	grpcSrv := grpc.NewServer()
+	// acceso directo a las tablas, CLAUDE.md §1.2). Interceptor Prometheus =>
+	// metricas grpc_server_* en el mismo /metrics 8080 (CLAUDE.md §5).
+	grpcSrv := grpc.NewServer(
+		grpc.UnaryInterceptor(metrics.GRPCServer.UnaryServerInterceptor()),
+	)
 	datamanagementv1.RegisterReadingServiceServer(grpcSrv, grpcapi.NewReadingServer(queryRepo, log))
+	// Preinicializa las series por metodo a 0 (evita gaps hasta la 1a llamada).
+	metrics.GRPCServer.InitializeMetrics(grpcSrv)
 	grpcLis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.GRPC.Port))
 	if err != nil {
 		return fmt.Errorf("grpc listen: %w", err)
