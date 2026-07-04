@@ -2,7 +2,11 @@ package observability
 
 import (
 	"net/http"
+	"strconv"
+	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	grpcprom "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -21,6 +25,12 @@ type Metrics struct {
 	MessagesInvalid   prometheus.Counter   // rechazo por schema
 	MessagesRetried   prometheus.Counter   // reintentos transitorios
 	PersistLatency    prometheus.Histogram // latencia persistencia (segundos)
+
+	// HTTP: cobertura completa via middleware (§5), no instrumentacion manual
+	// por handler. Mismo nombre que project-management/user-management para
+	// que el dashboard A-vs-B agregue todos los servicios Go por igual.
+	httpReqTotal    *prometheus.CounterVec
+	httpReqDuration *prometheus.HistogramVec
 
 	// GRPCServer instrumenta el servidor gRPC (ReadingService): throughput,
 	// latencia por metodo y errores por code. Se expone en el mismo /metrics.
@@ -70,7 +80,35 @@ func NewMetrics() *Metrics {
 			Help:    "Latencia de persistencia de un mensaje.",
 			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
 		}),
+		httpReqTotal: f.NewCounterVec(prometheus.CounterOpts{
+			Name: "http_requests_total",
+			Help: "Total de requests HTTP por metodo, ruta y codigo.",
+		}, []string{"method", "route", "status"}),
+		httpReqDuration: f.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "http_request_duration_seconds",
+			Help:    "Latencia de requests HTTP. Buckets default cubren p50..p99.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"method", "route", "status"}),
 	}
+}
+
+// Middleware mide cada request que pasa por el router: incrementa el contador
+// y observa la latencia. Envuelve el mux entero (no cada handler a mano) para
+// garantizar cobertura completa — una ruta nueva no puede quedar sin medir.
+func (m *Metrics) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		start := time.Now()
+		next.ServeHTTP(ww, r)
+
+		route := chi.RouteContext(r.Context()).RoutePattern()
+		if route == "" {
+			route = "unmatched"
+		}
+		status := strconv.Itoa(ww.Status())
+		m.httpReqTotal.WithLabelValues(r.Method, route, status).Inc()
+		m.httpReqDuration.WithLabelValues(r.Method, route, status).Observe(time.Since(start).Seconds())
+	})
 }
 
 // Handler devuelve el http.Handler de /metrics ligado a este registry.

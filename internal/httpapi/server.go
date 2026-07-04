@@ -43,6 +43,9 @@ func NewServer(q QueryService, h HealthChecker, c *observability.Counter, m *obs
 // Router arma las rutas conforme al OpenAPI de M0.
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
+	if s.metrics != nil {
+		r.Use(s.metrics.Middleware)
+	}
 	r.Get("/health", s.handleHealth)
 	r.Get("/api/v1/sensors/{sensor_id}/readings", s.handleSensorReadings)
 	r.Get("/api/v1/projects/{project_id}/readings", s.handleProjectReadings)
