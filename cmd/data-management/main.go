@@ -88,17 +88,22 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Consumer AMQP idempotente (M2).
-	var cons *consumer.Consumer
+	// Consumer AMQP idempotente (M2), con reconexion automatica: si el broker
+	// cae, el supervisor reconecta con backoff en vez de dejar el consumer muerto
+	// hasta un reinicio manual del pod (tolerancia a fallos, CLAUDE.md 2.1/2.2).
 	if cfg.RabbitMQ.ListenersEnabled {
-		cons, err = consumer.New(amqpURL, cfg.RabbitMQ.Queue, validator, rtr, log, counter, metrics)
-		if err != nil {
-			return fmt.Errorf("consumer: %w", err)
-		}
-		defer func() { _ = cons.Close() }()
 		go func() {
-			if err := cons.Run(ctx); err != nil {
-				log.Error("consumer termino con error", slog.String("error", err.Error()))
+			err := consumer.RunWithReconnect(ctx, consumer.DialConfig{
+				URL:       amqpURL,
+				Queue:     cfg.RabbitMQ.Queue,
+				Validator: validator,
+				Route:     rtr,
+				Log:       log,
+				Counter:   counter,
+				Metrics:   metrics,
+			})
+			if err != nil && !errors.Is(err, context.Canceled) {
+				log.Error("consumer supervisor termino con error", slog.String("error", err.Error()))
 				stop()
 			}
 		}()

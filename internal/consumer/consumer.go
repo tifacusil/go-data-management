@@ -5,12 +5,20 @@ package consumer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/AngelloFD/go-data-management/internal/observability"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
+
+// ErrConnClosed indica que la conexion al broker se cerro (RabbitMQ caido, red).
+// El supervisor (RunWithReconnect) lo trata como senal para reconectar, no como
+// fin normal: antes Run retornaba nil en este caso y el consumer quedaba muerto
+// con el proceso vivo (pod Ready pero sin consumir) hasta un reinicio manual.
+var ErrConnClosed = errors.New("conexion rabbitmq cerrada")
 
 // Consumer lee de la cola principal y procesa cada mensaje.
 type Consumer struct {
@@ -66,6 +74,10 @@ func (c *Consumer) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("consume: %w", err)
 	}
+	// NotifyClose dispara si la conexion cae aunque el canal de deliveries no se
+	// cierre limpio; junto al ramo !ok de abajo garantiza que una caida del
+	// broker haga retornar ErrConnClosed (no nil) para que el supervisor reconecte.
+	closeCh := c.conn.NotifyClose(make(chan *amqp.Error, 1))
 	c.log.Info("consumiendo", slog.String("queue", c.queue))
 
 	for {
@@ -73,10 +85,15 @@ func (c *Consumer) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			c.log.Info("consumer detenido por ctx")
 			return nil
+		case amqpErr := <-closeCh:
+			if amqpErr == nil {
+				return ErrConnClosed
+			}
+			return fmt.Errorf("%w: %v", ErrConnClosed, amqpErr)
 		case d, ok := <-deliveries:
 			if !ok {
 				c.log.Warn("canal de deliveries cerrado")
-				return nil
+				return ErrConnClosed
 			}
 			c.handle(ctx, d)
 		}
@@ -113,4 +130,84 @@ func (c *Consumer) Close() error {
 		return c.conn.Close()
 	}
 	return nil
+}
+
+// DialConfig junta lo necesario para (re)conectar y consumir. Se usa con
+// RunWithReconnect para sobrevivir caidas del broker sin reiniciar el proceso.
+type DialConfig struct {
+	URL       string
+	Queue     string
+	Validator validator
+	Route     route
+	Log       *slog.Logger
+	Counter   *observability.Counter
+	Metrics   *observability.Metrics
+}
+
+// RunWithReconnect consume para siempre, reconectando con backoff exponencial
+// (cap 30s) cada vez que la conexion al broker se pierde. Solo retorna cuando
+// ctx se cancela. Cierra el gap de resiliencia medido con chaos/kill-rabbitmq:
+// matar RabbitMQ ya no deja el consumer muerto hasta un reinicio manual del pod
+// (tolerancia a fallos, CLAUDE.md 2.1/2.2). El dial inicial tambien reintenta,
+// asi que el servicio arranca aunque el broker aun no este listo.
+func RunWithReconnect(ctx context.Context, cfg DialConfig) error {
+	const (
+		baseBackoff = 1 * time.Second
+		maxBackoff  = 30 * time.Second
+	)
+	backoff := baseBackoff
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		c, err := New(cfg.URL, cfg.Queue, cfg.Validator, cfg.Route, cfg.Log, cfg.Counter, cfg.Metrics)
+		if err != nil {
+			cfg.Log.Warn("rabbitmq_conectar_fallo_reintentando",
+				slog.String("error", err.Error()), slog.Duration("backoff", backoff))
+			if !sleepCtx(ctx, backoff) {
+				return ctx.Err()
+			}
+			backoff = nextBackoff(backoff, maxBackoff)
+			continue
+		}
+		cfg.Log.Info("rabbitmq_conectado")
+		backoff = baseBackoff // la sesion vivio: la proxima caida reconecta rapido
+		runErr := c.Run(ctx)
+		_ = c.Close()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		cfg.Log.Warn("consumer_conexion_perdida_reconectando",
+			slog.String("error", errString(runErr)), slog.Duration("backoff", backoff))
+		if !sleepCtx(ctx, backoff) {
+			return ctx.Err()
+		}
+		backoff = nextBackoff(backoff, maxBackoff)
+	}
+}
+
+func nextBackoff(cur, max time.Duration) time.Duration {
+	if n := cur * 2; n < max {
+		return n
+	}
+	return max
+}
+
+// sleepCtx duerme d, o retorna false si ctx se cancela antes.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+func errString(err error) string {
+	if err == nil {
+		return "(nil)"
+	}
+	return err.Error()
 }
