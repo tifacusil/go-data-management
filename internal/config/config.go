@@ -40,12 +40,19 @@ type RabbitMQ struct {
 	Password         string // secreto requerido
 	Queue            string
 	ListenersEnabled bool
+	Prefetch         int // QoS del canal (mensajes sin ack en vuelo)
+	Workers          int // goroutines concurrentes que persisten a MySQL
 }
 
 type MySQL struct {
 	// DSN se construye desde MYSQL_HOST/PORT/DATABASE/USER/PASSWORD (convencion
 	// de tesis-infra). Incluye parseTime=true&loc=UTC fijos.
 	DSN string
+	// Pool: acota conexiones abiertas al pool. Con procesamiento concurrente el
+	// consumer abre hasta Workers conexiones en paralelo; sin tope el pool crece
+	// sin limite y puede agotar max_connections de MySQL.
+	MaxOpenConns int
+	MaxIdleConns int
 }
 
 // buildDSN arma el DSN de go-sql-driver/mysql desde partes.
@@ -84,9 +91,18 @@ func Load() (*Config, error) {
 			Password:         os.Getenv("RABBITMQ_PASSWORD"),
 			Queue:            getenv("RABBITMQ_QUEUE", "data_management.persist"),
 			ListenersEnabled: getbool("RABBITMQ_LISTENERS_ENABLED", true),
+			// Defaults espejo del baseline Java (prefetch 50, concurrency 4-8):
+			// el persist es I/O-bound a MySQL, no CPU-bound, asi que la
+			// concurrencia -no mas cores- es lo que sube el throughput.
+			Prefetch: getint("RABBITMQ_LISTENER_PREFETCH", 50, &errs),
+			Workers:  getint("RABBITMQ_LISTENER_CONCURRENCY", 8, &errs),
 		},
 		MySQL: MySQL{
 			DSN: buildDSN(mysqlUser, mysqlPass, mysqlHost, mysqlPort, mysqlDB),
+			// Tope del pool alineado a la concurrencia del consumer + margen para
+			// la query API / health / gRPC que comparten el mismo *sql.DB.
+			MaxOpenConns: getint("MYSQL_MAX_OPEN_CONNS", 16, &errs),
+			MaxIdleConns: getint("MYSQL_MAX_IDLE_CONNS", 8, &errs),
 		},
 	}
 

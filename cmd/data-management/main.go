@@ -57,6 +57,11 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("abriendo mysql: %w", err)
 	}
+	// El consumer persiste en paralelo (RABBITMQ_LISTENER_CONCURRENCY): acota el
+	// pool para no agotar max_connections de MySQL bajo carga.
+	db.SetMaxOpenConns(cfg.MySQL.MaxOpenConns)
+	db.SetMaxIdleConns(cfg.MySQL.MaxIdleConns)
+	db.SetConnMaxLifetime(5 * time.Minute)
 	defer func() { _ = db.Close() }()
 
 	amqpURL := fmt.Sprintf("amqp://%s:%s@%s:%d/",
@@ -101,6 +106,8 @@ func run() error {
 				Log:       log,
 				Counter:   counter,
 				Metrics:   metrics,
+				Prefetch:  cfg.RabbitMQ.Prefetch,
+				Workers:   cfg.RabbitMQ.Workers,
 			})
 			if err != nil && !errors.Is(err, context.Canceled) {
 				log.Error("consumer supervisor termino con error", slog.String("error", err.Error()))
