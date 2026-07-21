@@ -87,7 +87,7 @@ func TestConsumer_Integration(t *testing.T) {
 	rtr := router.New(repo)
 	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
 
-	cons, err := consumer.New(amqpURL, consumer.QueueMain, v, rtr, log, nil, nil)
+	cons, err := consumer.New(amqpURL, consumer.QueueMain, v, rtr, log, nil, nil, 10 /*prefetch*/, 4 /*workers*/)
 	if err != nil {
 		t.Fatalf("consumer: %v", err)
 	}

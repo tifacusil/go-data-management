@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/AngelloFD/go-data-management/internal/observability"
@@ -28,12 +29,26 @@ type Consumer struct {
 	log       *slog.Logger
 	queue     string
 	counter   *observability.Counter
+	workers   int // goroutines concurrentes que drenan deliveries
 }
 
 // New conecta a RabbitMQ, declara la topologia y prepara el consumidor.
 // counter cuenta mensajes persistidos con exito (lo expone /health); puede ser nil.
 // metrics puede ser nil (tests); si no, el processor registra metricas + spans.
-func New(amqpURL, queue string, v validator, r route, log *slog.Logger, counter *observability.Counter, metrics *observability.Metrics) (*Consumer, error) {
+//
+// prefetch es el QoS del canal (mensajes sin ack que el broker adelanta) y
+// workers cuantas goroutines procesan en paralelo. El persist a MySQL es
+// sincrono: sin concurrencia el throughput queda limitado a 1 mensaje por RTT
+// de la BD (mismo cuello que el baseline Java resolvia con concurrentConsumers).
+// prefetch se ajusta a >= workers para que cada worker siempre tenga trabajo;
+// ambos se saturan a >= 1.
+func New(amqpURL, queue string, v validator, r route, log *slog.Logger, counter *observability.Counter, metrics *observability.Metrics, prefetch, workers int) (*Consumer, error) {
+	if workers < 1 {
+		workers = 1
+	}
+	if prefetch < workers {
+		prefetch = workers
+	}
 	conn, err := amqp.Dial(amqpURL)
 	if err != nil {
 		return nil, fmt.Errorf("conectando a rabbitmq: %w", err)
@@ -48,8 +63,8 @@ func New(amqpURL, queue string, v validator, r route, log *slog.Logger, counter 
 	// servicio no tiene permiso de configure sobre sensors.dlx / sensors.dead_letter.
 	// Solo consume la cola existente (igual que el baseline). El dead-lettering
 	// ocurre via x-dead-letter-exchange ya configurado en la cola (CLAUDE.md 4).
-	// Un mensaje en vuelo por consumidor: backpressure simple y orden de retry.
-	if err := ch.Qos(1, 0, false); err != nil {
+	// QoS = prefetch por canal (global=false): limita mensajes sin ack en vuelo.
+	if err := ch.Qos(prefetch, 0, false); err != nil {
 		_ = ch.Close()
 		_ = conn.Close()
 		return nil, fmt.Errorf("qos: %w", err)
@@ -65,39 +80,69 @@ func New(amqpURL, queue string, v validator, r route, log *slog.Logger, counter 
 		log:       log,
 		queue:     queue,
 		counter:   counter,
+		workers:   workers,
 	}, nil
 }
 
-// Run consume hasta que ctx se cancele. Bloquea.
+// Run consume hasta que ctx se cancele o caiga la conexion. Bloquea.
+//
+// Lanza c.workers goroutines que drenan el mismo canal de deliveries en
+// paralelo (los canales de Go admiten multiples receptores; amqp091 serializa
+// los Ack/Nack sobre el canal internamente). Cada worker procesa y ackea de
+// forma independiente, asi el throughput ya no queda atado a 1 mensaje por RTT
+// de MySQL. Idempotencia (INSERT IGNORE por message_id) y la DLQ hacen inocuo
+// perder el orden global entre workers.
 func (c *Consumer) Run(ctx context.Context) error {
 	deliveries, err := c.ch.Consume(c.queue, "", false /*autoAck*/, false, false, false, nil)
 	if err != nil {
 		return fmt.Errorf("consume: %w", err)
 	}
 	// NotifyClose dispara si la conexion cae aunque el canal de deliveries no se
-	// cierre limpio; junto al ramo !ok de abajo garantiza que una caida del
-	// broker haga retornar ErrConnClosed (no nil) para que el supervisor reconecte.
+	// cierre limpio; junto al ramo !ok de los workers garantiza que una caida
+	// del broker haga retornar ErrConnClosed (no nil) para que el supervisor
+	// reconecte.
 	closeCh := c.conn.NotifyClose(make(chan *amqp.Error, 1))
-	c.log.Info("consumiendo", slog.String("queue", c.queue))
+	c.log.Info("consumiendo", slog.String("queue", c.queue), slog.Int("workers", c.workers))
 
-	for {
-		select {
-		case <-ctx.Done():
-			c.log.Info("consumer detenido por ctx")
-			return nil
-		case amqpErr := <-closeCh:
-			if amqpErr == nil {
-				return ErrConnClosed
+	var wg sync.WaitGroup
+	for i := 0; i < c.workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case d, ok := <-deliveries:
+					if !ok {
+						// Broker caido/canal cerrado: sale el worker. La causa
+						// (ErrConnClosed) la reporta el select de abajo via closeCh.
+						return
+					}
+					c.handle(ctx, d)
+				}
 			}
-			return fmt.Errorf("%w: %v", ErrConnClosed, amqpErr)
-		case d, ok := <-deliveries:
-			if !ok {
-				c.log.Warn("canal de deliveries cerrado")
-				return ErrConnClosed
-			}
-			c.handle(ctx, d)
+		}()
+	}
+
+	// Espera la primera senal de terminacion y decide el error de retorno.
+	// Al cerrarse la conexion, deliveries tambien se cierra y los workers salen
+	// por !ok; al cancelarse ctx, salen por ctx.Done. En ambos casos wg.Wait
+	// drena los mensajes en vuelo antes de retornar (shutdown limpio).
+	var runErr error
+	select {
+	case <-ctx.Done():
+		c.log.Info("consumer detenido por ctx")
+		runErr = nil
+	case amqpErr := <-closeCh:
+		if amqpErr == nil {
+			runErr = ErrConnClosed
+		} else {
+			runErr = fmt.Errorf("%w: %v", ErrConnClosed, amqpErr)
 		}
 	}
+	wg.Wait()
+	return runErr
 }
 
 func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
@@ -142,6 +187,8 @@ type DialConfig struct {
 	Log       *slog.Logger
 	Counter   *observability.Counter
 	Metrics   *observability.Metrics
+	Prefetch  int // QoS del canal (mensajes sin ack en vuelo)
+	Workers   int // goroutines concurrentes de procesamiento
 }
 
 // RunWithReconnect consume para siempre, reconectando con backoff exponencial
@@ -160,7 +207,7 @@ func RunWithReconnect(ctx context.Context, cfg DialConfig) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		c, err := New(cfg.URL, cfg.Queue, cfg.Validator, cfg.Route, cfg.Log, cfg.Counter, cfg.Metrics)
+		c, err := New(cfg.URL, cfg.Queue, cfg.Validator, cfg.Route, cfg.Log, cfg.Counter, cfg.Metrics, cfg.Prefetch, cfg.Workers)
 		if err != nil {
 			cfg.Log.Warn("rabbitmq_conectar_fallo_reintentando",
 				slog.String("error", err.Error()), slog.Duration("backoff", backoff))
