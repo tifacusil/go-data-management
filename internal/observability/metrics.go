@@ -14,6 +14,17 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// httpBuckets son los cortes del histograma de latencia HTTP, compartidos por
+// los 4 servicios Go (data-management, data-receiving via prometheus-net,
+// project-management, user-management, early-warning) y alineados al SLO
+// declarado en application.yml de los servicios Spring (Sistema A):
+// 5ms,10ms,25ms,50ms,100ms,250ms,500ms,1s. Se agregan 2.5s/5s para no perder
+// resolucion en colas bajo carga. Usar prometheus.DefBuckets aca produciria
+// percentiles no comparables contra Sistema A: cada configuracion de buckets
+// interpola distinto dentro de histogram_quantile aunque las muestras de
+// origen sean identicas.
+var httpBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5}
+
 // Metrics agrupa las metricas Prometheus del servicio (CLAUDE.md 5).
 // Usa un registry propio (no el global) para evitar panics de doble registro
 // y permitir multiples instancias en tests.
@@ -86,8 +97,8 @@ func NewMetrics() *Metrics {
 		}, []string{"method", "route", "status"}),
 		httpReqDuration: f.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "http_request_duration_seconds",
-			Help:    "Latencia de requests HTTP. Buckets default cubren p50..p99.",
-			Buckets: prometheus.DefBuckets,
+			Help:    "Latencia de requests HTTP. Buckets alineados al SLO de Micrometer en Sistema A (5ms..1s) mas 2.5s/5s, para que histogram_quantile sea comparable entre A y B.",
+			Buckets: httpBuckets,
 		}, []string{"method", "route", "status"}),
 	}
 }
