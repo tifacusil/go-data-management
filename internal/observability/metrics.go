@@ -32,6 +32,7 @@ type Metrics struct {
 	reg *prometheus.Registry
 
 	MessagesProcessed prometheus.Counter   // throughput acumulado (rate => msg/s)
+	MessagesIgnored   prometheus.Counter   // INSERT IGNORE sin filas: duplicado (AP6), ack
 	MessagesDLQ       prometheus.Counter   // a dead-letter
 	MessagesInvalid   prometheus.Counter   // rechazo por schema
 	MessagesRetried   prometheus.Counter   // reintentos transitorios
@@ -71,6 +72,12 @@ func NewMetrics() *Metrics {
 		MessagesProcessed: f.NewCounter(prometheus.CounterOpts{
 			Name: "dm_messages_processed_total",
 			Help: "Mensajes persistidos con exito.",
+		}),
+		// Aparte de processed: un duplicado no es throughput nuevo, y sumarlo
+		// ahi inflaria el msg/s comparado contra Sistema A.
+		MessagesIgnored: f.NewCounter(prometheus.CounterOpts{
+			Name: "dm_messages_ignored_total",
+			Help: "Mensajes cuyo INSERT IGNORE no escribio filas (message_id ya persistido); se hace ack.",
 		}),
 		MessagesDLQ: f.NewCounter(prometheus.CounterOpts{
 			Name: "dm_messages_dlq_total",

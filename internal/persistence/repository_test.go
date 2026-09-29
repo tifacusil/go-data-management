@@ -59,12 +59,20 @@ func TestPersistGNSS_DuplicateNoOp(t *testing.T) {
 	e := sampleEnvelope()
 	p := &model.GNSSPayload{}
 
-	// INSERT IGNORE de duplicado: 0 filas afectadas, sin error -> idempotente.
+	// INSERT IGNORE de duplicado: 0 filas afectadas, sin error de MySQL. Es
+	// no-op (idempotente) pero se reporta como ErrIgnored para que quede
+	// trazado; no debe clasificarse como retryable ni como permanente.
 	mock.ExpectExec("INSERT IGNORE INTO gnss_readings").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
-	if err := repo.PersistGNSS(context.Background(), e, p); err != nil {
-		t.Fatalf("duplicado debe ser no-op, got %v", err)
+	err := repo.PersistGNSS(context.Background(), e, p)
+	if !errors.Is(err, ErrIgnored) {
+		t.Fatalf("duplicado debe reportarse como ErrIgnored, got %v", err)
+	}
+	var re *RetryableError
+	var ne *NonRetryableError
+	if errors.As(err, &re) || errors.As(err, &ne) {
+		t.Fatalf("un duplicado no es una falla (ni retry ni DLQ), got %T", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("expectativas: %v", err)

@@ -3,6 +3,7 @@ package persistence_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -91,9 +92,10 @@ func TestMigrateAndPersist_Integration(t *testing.T) {
 	if err := repo.PersistGNSS(ctx, e, p); err != nil {
 		t.Fatalf("insert 1: %v", err)
 	}
-	// Mismo message_id + timestamp -> INSERT IGNORE no-op (idempotencia).
-	if err := repo.PersistGNSS(ctx, e, p); err != nil {
-		t.Fatalf("insert dup: %v", err)
+	// Mismo message_id + timestamp -> INSERT IGNORE no-op (idempotencia),
+	// reportado como ErrIgnored para que el consumidor lo trace y haga ack.
+	if err := repo.PersistGNSS(ctx, e, p); !errors.Is(err, persistence.ErrIgnored) {
+		t.Fatalf("insert dup: esperaba ErrIgnored, got %v", err)
 	}
 
 	var rows int

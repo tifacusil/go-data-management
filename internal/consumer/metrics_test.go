@@ -36,6 +36,35 @@ func TestProcessor_MetricsMove(t *testing.T) {
 	}
 }
 
+// TestProcessor_IgnoredInsertAcksWithoutRetry cubre AP6 en data-management: un
+// message_id ya persistido (INSERT IGNORE sin filas) se confirma de inmediato,
+// sin reintentos ni DLQ, y cuenta como ignorado — no como throughput nuevo.
+func TestProcessor_IgnoredInsertAcksWithoutRetry(t *testing.T) {
+	m := observability.NewMetrics()
+	r := &fakeRouter{errs: []error{persistence.ErrIgnored}}
+	p := newProcessor(fakeValidator{}, r, quietLogger()).withObservability(m, nil)
+	p.sleep = func(_ time.Duration) {}
+
+	if got := p.process(context.Background(), []byte(validRaw)); got != outcomeAck {
+		t.Fatalf("esperaba ack, got %v", got)
+	}
+	if r.calls != 1 {
+		t.Errorf("un insert ignorado no se reintenta: calls=%d, esperaba 1", r.calls)
+	}
+	if v := testutil.ToFloat64(m.MessagesIgnored); v != 1 {
+		t.Errorf("ignored=%v, esperaba 1", v)
+	}
+	for name, c := range map[string]float64{
+		"processed": testutil.ToFloat64(m.MessagesProcessed),
+		"retried":   testutil.ToFloat64(m.MessagesRetried),
+		"dlq":       testutil.ToFloat64(m.MessagesDLQ),
+	} {
+		if c != 0 {
+			t.Errorf("%s=%v, esperaba 0", name, c)
+		}
+	}
+}
+
 // TestProcessor_RetryMetric verifica que los reintentos transitorios cuenten.
 func TestProcessor_RetryMetric(t *testing.T) {
 	m := observability.NewMetrics()
