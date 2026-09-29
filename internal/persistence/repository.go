@@ -31,12 +31,11 @@ func (r *Repository) PersistGNSS(ctx context.Context, e *model.Envelope, p *mode
 		 displacement_x_mm, displacement_y_mm, displacement_z_mm,
 		 displacement_horizontal_mm, cumulative_displacement_mm, fix_quality)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err := r.db.ExecContext(ctx, q,
+	return r.insert(ctx, q,
 		e.MessageID, e.ProjectID, e.SensorID, utc(e.Timestamp), utc(e.ReceivedAt),
 		p.DisplacementXmm, p.DisplacementYmm, p.DisplacementZmm,
 		p.DisplacementHorizontalMm, p.CumulativeDisplacementMm, p.FixQuality,
 	)
-	return classifyDBError(err)
 }
 
 func (r *Repository) PersistRainfall(ctx context.Context, e *model.Envelope, p *model.RainfallPayload) error {
@@ -44,11 +43,10 @@ func (r *Repository) PersistRainfall(ctx context.Context, e *model.Envelope, p *
 		(message_id, project_id, sensor_id, timestamp, received_at,
 		 rainfall_mm, cumulative_rainfall_mm, interval_minutes)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err := r.db.ExecContext(ctx, q,
+	return r.insert(ctx, q,
 		e.MessageID, e.ProjectID, e.SensorID, utc(e.Timestamp), utc(e.ReceivedAt),
 		p.RainfallMm, p.CumulativeRainfallMm, p.IntervalMinutes,
 	)
-	return classifyDBError(err)
 }
 
 func (r *Repository) PersistStrain(ctx context.Context, e *model.Envelope, p *model.StrainPayload) error {
@@ -56,11 +54,10 @@ func (r *Repository) PersistStrain(ctx context.Context, e *model.Envelope, p *mo
 		(message_id, project_id, sensor_id, timestamp, received_at,
 		 strain_microstrain, temperature_celsius)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`
-	_, err := r.db.ExecContext(ctx, q,
+	return r.insert(ctx, q,
 		e.MessageID, e.ProjectID, e.SensorID, utc(e.Timestamp), utc(e.ReceivedAt),
 		p.StrainMicrostrain, p.TemperatureCelsius,
 	)
-	return classifyDBError(err)
 }
 
 func (r *Repository) PersistSoilPressure(ctx context.Context, e *model.Envelope, p *model.SoilPressurePayload) error {
@@ -68,11 +65,10 @@ func (r *Repository) PersistSoilPressure(ctx context.Context, e *model.Envelope,
 		(message_id, project_id, sensor_id, timestamp, received_at,
 		 pressure_kpa, temperature_celsius)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`
-	_, err := r.db.ExecContext(ctx, q,
+	return r.insert(ctx, q,
 		e.MessageID, e.ProjectID, e.SensorID, utc(e.Timestamp), utc(e.ReceivedAt),
 		p.PressureKpa, p.TemperatureCelsius,
 	)
-	return classifyDBError(err)
 }
 
 func (r *Repository) PersistDeepDisplacement(ctx context.Context, e *model.Envelope, p *model.DeepDisplacementPayload) error {
@@ -80,11 +76,31 @@ func (r *Repository) PersistDeepDisplacement(ctx context.Context, e *model.Envel
 		(message_id, project_id, sensor_id, timestamp, received_at,
 		 depth_m, tilt_x_mm, tilt_y_mm, cumulative_tilt_mm)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err := r.db.ExecContext(ctx, q,
+	return r.insert(ctx, q,
 		e.MessageID, e.ProjectID, e.SensorID, utc(e.Timestamp), utc(e.ReceivedAt),
 		p.DepthM, p.TiltXmm, p.TiltYmm, p.CumulativeTiltMm,
 	)
-	return classifyDBError(err)
+}
+
+// insert ejecuta un INSERT IGNORE y distingue "fila escrita" de "fila
+// ignorada". Sin esa distincion un duplicado era indistinguible de un insert
+// exitoso: AP6 solo podia verificarse por ausencia de efecto (conteo de filas),
+// no por una traza positiva como la de early-warning.
+func (r *Repository) insert(ctx context.Context, q string, args ...any) error {
+	res, err := r.db.ExecContext(ctx, q, args...)
+	if err != nil {
+		return classifyDBError(err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		// El driver siempre reporta filas afectadas para un INSERT; si no pudo,
+		// la fila si se escribio y no hay nada que reintentar.
+		return nil
+	}
+	if n == 0 {
+		return ErrIgnored
+	}
+	return nil
 }
 
 // Ping verifica conectividad real a MySQL (lo usa el health check, CLAUDE.md 1.6).

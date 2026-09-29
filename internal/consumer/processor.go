@@ -119,6 +119,15 @@ func (p *processor) persistWithRetry(ctx context.Context, e *model.Envelope) out
 			return outcomeAck
 		}
 
+		// 0 filas: la lectura ya estaba (redelivery / reinyeccion, AP6). Es un
+		// exito para el broker — ack, sin reintento ni DLQ — pero queda trazado
+		// con el trace_id, igual que duplicate_skipped en early-warning.
+		if errors.Is(err, persistence.ErrIgnored) {
+			log.Info("insert ignorado, ack", slog.Int("attempt", attempt))
+			p.incIgnored()
+			return outcomeAck
+		}
+
 		var nonRetry *persistence.NonRetryableError
 		if errors.As(err, &nonRetry) {
 			log.Warn("error permanente, a DLQ", slog.String("error", err.Error()))
@@ -163,6 +172,11 @@ func (p *processor) persistWithRetry(ctx context.Context, e *model.Envelope) out
 func (p *processor) incProcessed() {
 	if p.metrics != nil {
 		p.metrics.MessagesProcessed.Inc()
+	}
+}
+func (p *processor) incIgnored() {
+	if p.metrics != nil {
+		p.metrics.MessagesIgnored.Inc()
 	}
 }
 func (p *processor) incDLQ() {

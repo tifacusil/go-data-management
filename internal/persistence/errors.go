@@ -22,6 +22,17 @@ type NonRetryableError struct{ Err error }
 func (e *NonRetryableError) Error() string { return "non-retryable: " + e.Err.Error() }
 func (e *NonRetryableError) Unwrap() error { return e.Err }
 
+// ErrIgnored indica que el INSERT IGNORE no escribio ninguna fila. NO es una
+// falla: el consumidor debe hacer ack (CLAUDE.md 1.3). Existe para que el
+// descarte quede trazado en vez de pasar como un insert exitoso.
+//
+// La causa esperada es un message_id ya persistido (redelivery o reinyeccion,
+// AP6), pero IGNORE tambien convierte en warning otros rechazos — por ejemplo,
+// un timestamp sin particion anual que lo reciba (B2) — y esos tambien llegan
+// aca como 0 filas. Por eso el nombre es "ignorado" y no "duplicado": el log y
+// la metrica no deben afirmar una causa que el driver no informa.
+var ErrIgnored = errors.New("insert ignorado: 0 filas afectadas (message_id ya persistido o fila descartada por IGNORE)")
+
 // classifyDBError decide si un error de DB es transitorio (retryable) o no.
 // Espejo de PersistenceService.wrapDbException del baseline Java.
 func classifyDBError(err error) error {
